@@ -1,0 +1,20 @@
+# Run database migrations once per release (not on every API pod start, which
+# would race when several replicas boot together).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: omnirag-migrate
+  namespace: omnirag
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/YOUR-USER/omnirag-backend:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: {name: omnirag-config}
+            - secretRef: {name: omnirag-secrets}

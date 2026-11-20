@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: omnirag
+spec:
+  serviceName: qdrant
+  replicas: 1
+  selector:
+    matchLabels: {app: qdrant}
+  template:
+    metadata:
+      labels: {app: qdrant}
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.12.4
+          ports:
+            - containerPort: 6333
+          readinessProbe:
+            tcpSocket:
+              port: 6333
+            periodSeconds: 5
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: omnirag
+spec:
+  selector: {app: qdrant}
+  ports:
+    - port: 6333
+      targetPort: 6333

@@ -1,0 +1,15 @@
+# Uploaded files are written by the API pod and read by the worker pod, so
+# they need a volume both can mount at once (ReadWriteMany: NFS, Filestore,
+# EFS, Azure Files...). This is a known limitation of the current code:
+# the clean fix is an object-storage adapter (S3/GCS) behind the existing
+# storage interface, after which this claim can be deleted.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads
+  namespace: omnirag
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 10Gi

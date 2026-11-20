@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: omnirag
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/YOUR-USER/omnirag-frontend:latest
+          ports:
+            - containerPort: 80
+          env:
+            # Plain HTTP inside the cluster; TLS terminates at the Ingress.
+            - name: SITE_ADDRESS
+              value: ":80"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: omnirag
+spec:
+  selector: {app: frontend}
+  ports:
+    - port: 80
+      targetPort: 80

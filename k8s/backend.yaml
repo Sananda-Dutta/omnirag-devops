@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: omnirag
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: backend}
+  template:
+    metadata:
+      labels: {app: backend}
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/YOUR-USER/omnirag-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: {name: omnirag-config}
+            - secretRef: {name: omnirag-secrets}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+          resources:
+            requests: {cpu: 200m, memory: 384Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: omnirag
+spec:
+  selector: {app: backend}
+  ports:
+    - port: 8000
+      targetPort: 8000
