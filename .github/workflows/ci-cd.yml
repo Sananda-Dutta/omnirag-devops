@@ -1,3 +1,4 @@
+
 name: OmniRAG DevOps CI/CD
 
 on:
@@ -14,24 +15,44 @@ jobs:
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
+
+    env:
+      APP_ENV: local
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://omnirag:omnirag@localhost:5432/omnirag_test
+      REDIS_URL: redis://localhost:6379/0
+      VECTOR_DB_URL: http://localhost:6333
+      SECRET_KEY: ci-test-secret-not-for-production
+      LLM_PROVIDER: local
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_DIMENSION: "384"
+      EVAL_PROVIDER: local
+
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: omnirag
           POSTGRES_PASSWORD: omnirag
-          POSTGRES_DB: omnirag
+          POSTGRES_DB: omnirag_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U omnirag"
+          --health-cmd "pg_isready -U omnirag -d omnirag_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
       redis:
         image: redis:7-alpine
         ports:
           - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
       qdrant:
         image: qdrant/qdrant:v1.12.4
         ports:
@@ -41,78 +62,99 @@ jobs:
       - name: Checkout DevOps repository
         uses: actions/checkout@v4
 
-      - name: Checkout OmniRAG application
+      - name: Checkout clean OmniRAG source
         uses: actions/checkout@v4
         with:
           repository: Sananda-Dutta/Omnirag
+          ref: ci-source-clean
           path: omnirag
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install backend dependencies
-        working-directory: omnirag/backend
-        run: pip install -r requirements.txt
+        working-directory: omnirag/omnirag/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Configure test environment
-        working-directory: omnirag/backend
-        run: cp .env.example .env
+      - name: Wait for Qdrant
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:6333/readyz; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Qdrant did not become ready"
+          exit 1
 
       - name: Run backend tests
-        working-directory: omnirag/backend
+        working-directory: omnirag/omnirag/backend
         run: pytest tests/ -q
 
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Checkout OmniRAG application
+    steps:
+      - name: Checkout DevOps repository
+        uses: actions/checkout@v4
+
+      - name: Checkout clean OmniRAG source
         uses: actions/checkout@v4
         with:
           repository: Sananda-Dutta/Omnirag
+          ref: ci-source-clean
           path: omnirag
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: omnirag/omnirag/frontend/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: omnirag/frontend
+        working-directory: omnirag/omnirag/frontend
         run: npm ci
 
       - name: TypeScript check
-        working-directory: omnirag/frontend
+        working-directory: omnirag/omnirag/frontend
         run: npx tsc -b
 
       - name: Build frontend
-        working-directory: omnirag/frontend
+        working-directory: omnirag/omnirag/frontend
         run: npm run build
 
   docker-images:
     name: Docker Build and Push
     needs: [backend-tests, frontend-build]
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Checkout OmniRAG application
+    steps:
+      - name: Checkout DevOps repository
+        uses: actions/checkout@v4
+
+      - name: Checkout clean OmniRAG source
         uses: actions/checkout@v4
         with:
           repository: Sananda-Dutta/Omnirag
+          ref: ci-source-clean
           path: omnirag
 
       - name: Prepare Docker build contexts
         run: |
-          cp backend/Dockerfile omnirag/backend/Dockerfile
-          cp backend/.dockerignore omnirag/backend/.dockerignore
-          cp frontend/Dockerfile omnirag/frontend/Dockerfile
-          cp frontend/.dockerignore omnirag/frontend/.dockerignore
-          cp frontend/Caddyfile omnirag/frontend/Caddyfile
+          cp backend/Dockerfile omnirag/omnirag/backend/Dockerfile
+          cp backend/.dockerignore omnirag/omnirag/backend/.dockerignore
+          cp frontend/Dockerfile omnirag/omnirag/frontend/Dockerfile
+          cp frontend/.dockerignore omnirag/omnirag/frontend/.dockerignore
+          cp frontend/Caddyfile omnirag/omnirag/frontend/Caddyfile
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -125,13 +167,13 @@ jobs:
       - name: Build backend image
         uses: docker/build-push-action@v6
         with:
-          context: ./omnirag/backend
+          context: ./omnirag/omnirag/backend
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository_owner }}/omnirag-backend:latest
+          tags: ghcr.io/sananda-dutta/omnirag-backend:latest
 
       - name: Build frontend image
         uses: docker/build-push-action@v6
         with:
-          context: ./omnirag/frontend
+          context: ./omnirag/omnirag/frontend
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository_owner }}/omnirag-frontend:latest
+          tags: ghcr.io/sananda-dutta/omnirag-frontend:latest
